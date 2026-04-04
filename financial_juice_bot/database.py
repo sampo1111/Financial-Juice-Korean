@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+import sqlite3
+
+from .models import NewsInsight
+
+
+class Database:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def initialize(self) -> None:
+        with self._connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS subscribers (
+                    chat_id INTEGER PRIMARY KEY,
+                    chat_type TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS processed_news (
+                    guid TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    translated_title TEXT NOT NULL,
+                    explanation TEXT NOT NULL,
+                    source_url TEXT NOT NULL,
+                    published_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS sent_news (
+                    guid TEXT NOT NULL,
+                    chat_id INTEGER NOT NULL,
+                    sent_at TEXT NOT NULL,
+                    PRIMARY KEY (guid, chat_id)
+                );
+                """
+            )
+
+    def upsert_subscriber(self, chat_id: int, chat_type: str, label: str) -> None:
+        now = self._now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO subscribers (chat_id, chat_type, label, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, 1, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    chat_type = excluded.chat_type,
+                    label = excluded.label,
+                    is_active = 1,
+                    updated_at = excluded.updated_at
+                """,
+                (chat_id, chat_type, label, now, now),
+            )
+
+    def deactivate_subscriber(self, chat_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE subscribers SET is_active = 0, updated_at = ? WHERE chat_id = ?",
+                (self._now(), chat_id),
+            )
+
+    def is_active_subscriber(self, chat_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT is_active FROM subscribers WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+        return bool(row and row["is_active"])
+
+    def list_active_chat_ids(self) -> list[int]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT chat_id FROM subscribers WHERE is_active = 1 ORDER BY created_at ASC"
+            ).fetchall()
+        return [int(row["chat_id"]) for row in rows]
+
+    def get_processed_news(self, guid: str) -> NewsInsight | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT guid, title, translated_title, explanation, source_url, published_at
+                FROM processed_news
+                WHERE guid = ?
+                """,
+                (guid,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return NewsInsight(
+            guid=row["guid"],
+            title=row["title"],
+            translated_title=row["translated_title"],
+            explanation=row["explanation"],
+            link=row["source_url"],
+            published_at=datetime.fromisoformat(row["published_at"]),
+        )
+
+    def save_processed_news(self, insight: NewsInsight) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO processed_news (
+                    guid, title, translated_title, explanation, source_url, published_at, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(guid) DO UPDATE SET
+                    title = excluded.title,
+                    translated_title = excluded.translated_title,
+                    explanation = excluded.explanation,
+                    source_url = excluded.source_url,
+                    published_at = excluded.published_at
+                """,
+                (
+                    insight.guid,
+                    insight.title,
+                    insight.translated_title,
+                    insight.explanation,
+                    insight.link,
+                    insight.published_at.isoformat(),
+                    self._now(),
+                ),
+            )
+
+    def list_recent_processed_news(self, limit: int) -> list[NewsInsight]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT guid, title, translated_title, explanation, source_url, published_at
+                FROM processed_news
+                ORDER BY published_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [
+            NewsInsight(
+                guid=row["guid"],
+                title=row["title"],
+                translated_title=row["translated_title"],
+                explanation=row["explanation"],
+                link=row["source_url"],
+                published_at=datetime.fromisoformat(row["published_at"]),
+            )
+            for row in rows
+        ]
+
+    def list_recent_processed_guids(self, limit: int) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT guid
+                FROM processed_news
+                ORDER BY published_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [str(row["guid"]) for row in rows]
+
+    def has_sent_news(self, chat_id: int, guid: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM sent_news WHERE chat_id = ? AND guid = ?",
+                (chat_id, guid),
+            ).fetchone()
+        return row is not None
+
+    def mark_news_sent(self, chat_id: int, guid: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO sent_news (guid, chat_id, sent_at)
+                VALUES (?, ?, ?)
+                """,
+                (guid, chat_id, self._now()),
+            )
+
+    def seed_sent_news(self, chat_id: int, guids: list[str]) -> None:
+        if not guids:
+            return
+
+        now = self._now()
+        with self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO sent_news (guid, chat_id, sent_at)
+                VALUES (?, ?, ?)
+                """,
+                [(guid, chat_id, now) for guid in guids],
+            )
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now().isoformat(timespec="seconds")

@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+financial_juice_bot/__pycache__/
+.env
+bot.db
+*.db
