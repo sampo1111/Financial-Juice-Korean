@@ -28,7 +28,8 @@ def load_settings() -> Settings:
 
     return Settings(
         telegram_bot_token=telegram_bot_token,
-        ollama_model=os.getenv("OLLAMA_MODEL", "llama3:8b").strip() or "llama3:8b",
+        ollama_model=os.getenv("OLLAMA_MODEL", "martain7r/finance-llama-8b:q4_k_m").strip()
+        or "martain7r/finance-llama-8b:q4_k_m",
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
         financial_juice_rss_url=os.getenv(
             "FINANCIAL_JUICE_RSS_URL",

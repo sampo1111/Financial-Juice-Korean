@@ -6,7 +6,7 @@ import re
 
 import httpx
 
-from .models import NewsItem, NewsInsight
+from .models import NewsInsight, NewsItem
 
 
 class OllamaError(RuntimeError):

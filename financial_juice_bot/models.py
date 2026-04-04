@@ -20,4 +20,3 @@ class NewsInsight:
     explanation: str
     link: str
     published_at: datetime
-

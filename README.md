@@ -37,10 +37,10 @@ pip install -r requirements.txt
 3. Ollama 모델 준비
 
 ```powershell
-ollama pull llama3:8b
+ollama pull martain7r/finance-llama-8b:q4_k_m
 ```
 
-이미 다른 모델을 쓰고 싶다면 `.env`의 `OLLAMA_MODEL` 값만 바꾸면 됩니다.
+현재 기본값은 금융 특화 모델인 `martain7r/finance-llama-8b:q4_k_m`입니다. 다른 모델을 쓰고 싶다면 `.env`의 `OLLAMA_MODEL` 값만 바꾸면 됩니다.
 
 4. 텔레그램 봇 토큰 발급
 
@@ -56,7 +56,7 @@ ollama pull llama3:8b
 
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCDEF...
-OLLAMA_MODEL=llama3:8b
+OLLAMA_MODEL=martain7r/finance-llama-8b:q4_k_m
 RSS_MIN_FETCH_INTERVAL_SECONDS=90
 ```
 

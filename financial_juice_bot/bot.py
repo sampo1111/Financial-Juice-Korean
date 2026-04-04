@@ -227,7 +227,7 @@ class FinancialJuiceTelegramBot:
         local_time = insight.published_at.astimezone(ZoneInfo(self.settings.timezone))
         time_text = local_time.strftime("%Y-%m-%d %H:%M %Z")
         return (
-            "<b>Financial Juice</b>\n"
+            f"<b>Financial Juice</b>\n"
             f"<b>원문</b>: {escape(insight.title)}\n"
             f"<b>번역</b>: {escape(insight.translated_title)}\n"
             f"<b>설명</b>: {escape(insight.explanation)}\n"
