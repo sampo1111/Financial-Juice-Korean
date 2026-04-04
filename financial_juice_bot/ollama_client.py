@@ -33,6 +33,8 @@ class OllamaClient:
             "- translated_title: one sharp Korean market headline, not a literal translation.\n"
             "- summary: exactly 1 Korean sentence explaining the event in plain, natural Korean.\n"
             "- term_note: if the headline contains technical macro/market jargon or an important level, add 1 Korean sentence explaining what the term means and how to read the number; otherwise return an empty string.\n"
+            "- If the headline includes PMI, CPI, PPI, PCE, NFP, payrolls, ISM, GDP, unemployment rate, jobless rate, Treasury yield, basis points, or a threshold like 50, term_note is mandatory and must not be empty.\n"
+            "- For PMI or ISM levels, explicitly explain the 50 threshold and say whether the shown level signals expansion, borderline, or contraction.\n"
             "- market_view: exactly 1 Korean sentence explaining the likely market reading only when it can be inferred from the headline.\n"
             "- Do not invent facts beyond the headline.\n"
             "- Avoid stiff phrases such as '발표한 바에 따르면', '시장적 영향은 아직 확인되지 않았다', '관련 소식이다'.\n"
@@ -100,6 +102,8 @@ class OllamaClient:
         translated_title = str(parsed.get("translated_title", "")).strip()
         summary = self._normalize_sentence(str(parsed.get("summary", "")).strip())
         term_note = self._normalize_sentence(str(parsed.get("term_note", "")).strip(), allow_empty=True)
+        if not term_note:
+            term_note = self._build_fallback_term_note(item.title)
         market_view = self._normalize_sentence(str(parsed.get("market_view", "")).strip())
         explanation_parts = [summary]
         if term_note:
@@ -187,3 +191,91 @@ class OllamaClient:
             notes.append("- No special glossary note is required unless the headline clearly contains market jargon.")
 
         return "\n".join(notes)
+
+    @classmethod
+    def _build_fallback_term_note(cls, headline: str) -> str:
+        upper_headline = headline.upper()
+        level = cls._extract_index_level(headline)
+
+        if "PMI" in upper_headline:
+            zone = cls._describe_diffusion_index(level)
+            if zone:
+                return cls._normalize_sentence(
+                    f"PMI는 기업 구매담당자 경기지수로, 50을 넘으면 경기 확장인데 {level:.1f}는 {zone}으로 읽는다."
+                )
+            return cls._normalize_sentence(
+                "PMI는 기업 구매담당자 경기지수로, 50을 넘으면 경기 확장, 50을 밑돌면 위축으로 읽는다."
+            )
+
+        if "ISM" in upper_headline:
+            zone = cls._describe_diffusion_index(level)
+            if zone:
+                return cls._normalize_sentence(
+                    f"ISM은 미국 공급관리협회 경기지수로, 50이 기준선인데 {level:.1f}는 {zone}으로 해석한다."
+                )
+            return cls._normalize_sentence(
+                "ISM은 미국 공급관리협회 경기지수로, 50을 넘으면 확장, 50을 밑돌면 위축으로 읽는다."
+            )
+
+        if "CPI" in upper_headline:
+            return cls._normalize_sentence(
+                "CPI는 소비자물가를 보여주는 대표 인플레이션 지표로, 예상보다 높으면 긴축 우려를 키우고 낮으면 금리 부담을 덜 수 있다."
+            )
+
+        if "PPI" in upper_headline:
+            return cls._normalize_sentence(
+                "PPI는 생산자물가 지표로, 예상보다 높으면 기업의 원가 부담과 향후 물가 압력을 시사할 수 있다."
+            )
+
+        if "PCE" in upper_headline:
+            return cls._normalize_sentence(
+                "PCE는 연준이 중요하게 보는 물가 지표로, 예상보다 높으면 금리 인하 기대를 늦출 수 있다."
+            )
+
+        if "NFP" in upper_headline or "NONFARM" in upper_headline or "PAYROLLS" in upper_headline:
+            return cls._normalize_sentence(
+                "NFP는 미국 비농업부문 고용지표로, 고용이 강하면 금리 부담과 달러 강세 재료로 읽히기 쉽다."
+            )
+
+        if "GDP" in upper_headline:
+            return cls._normalize_sentence(
+                "GDP는 경제 성장률을 보여주는 대표 지표로, 예상보다 강하면 경기 확장 기대를 높이고 약하면 성장 둔화 우려를 키울 수 있다."
+            )
+
+        if "UNEMPLOYMENT RATE" in upper_headline or "JOBLESS RATE" in upper_headline:
+            return cls._normalize_sentence(
+                "실업률은 고용시장의 체온을 보여주는 지표로, 오르면 경기 둔화 신호로, 낮아지면 고용이 여전히 타이트하다는 뜻으로 읽힌다."
+            )
+
+        if "TREASURY YIELD" in upper_headline or " YIELD" in upper_headline:
+            return cls._normalize_sentence(
+                "국채금리는 채권 수익률을 뜻하며, 오르면 긴축과 할인율 부담, 내리면 금리 완화 기대로 해석되는 경우가 많다."
+            )
+
+        if "BASIS POINT" in upper_headline or "BPS" in upper_headline or "BP " in upper_headline:
+            return cls._normalize_sentence(
+                "1bp는 0.01%포인트를 뜻해, 25bp 인상은 기준금리나 금리가 0.25%포인트 오르는 의미다."
+            )
+
+        return ""
+
+    @staticmethod
+    def _extract_index_level(headline: str) -> float | None:
+        matches = re.findall(r"\b([1-9][0-9](?:\.[0-9]+)?)\b", headline)
+        for match in matches:
+            value = float(match)
+            if value <= 70:
+                return value
+        return None
+
+    @staticmethod
+    def _describe_diffusion_index(level: float | None) -> str | None:
+        if level is None:
+            return None
+        if level >= 50:
+            return "경기 확장 구간"
+        if level >= 48:
+            return "위축이 심하지 않은 둔화 구간"
+        if level >= 45:
+            return "부진이 비교적 뚜렷한 위축 구간"
+        return "경기 둔화 압력이 강한 위축 구간"
