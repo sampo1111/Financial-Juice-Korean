@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from .database import Database
 from .models import NewsInsight, NewsItem
-from .ollama_client import OllamaClient
+from .ollama_client import OllamaClient, OllamaError
 from .rss import FinancialJuiceFeedClient
+
+
+logger = logging.getLogger(__name__)
 
 
 class NewsService:
@@ -25,7 +29,10 @@ class NewsService:
             items = await self.feed_client.fetch_latest(limit=limit)
             insights: list[NewsInsight] = []
             for item in items:
-                insights.append(await self.ensure_insight(item))
+                try:
+                    insights.append(await self.ensure_insight(item))
+                except OllamaError:
+                    logger.exception("Failed to create insight for guid=%s", item.guid)
             return insights
 
     def get_latest_from_database(self, limit: int) -> list[NewsInsight]:

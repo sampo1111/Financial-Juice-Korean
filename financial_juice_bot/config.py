@@ -10,6 +10,7 @@ class Settings:
     telegram_bot_token: str
     ollama_model: str
     ollama_base_url: str
+    ollama_timeout_seconds: float
     financial_juice_rss_url: str
     poll_interval_seconds: int
     rss_min_fetch_interval_seconds: int
@@ -31,6 +32,7 @@ def load_settings() -> Settings:
         ollama_model=os.getenv("OLLAMA_MODEL", "martain7r/finance-llama-8b:q4_k_m").strip()
         or "martain7r/finance-llama-8b:q4_k_m",
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
+        ollama_timeout_seconds=max(30.0, float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180"))),
         financial_juice_rss_url=os.getenv(
             "FINANCIAL_JUICE_RSS_URL",
             "https://www.financialjuice.com/feed.ashx?xy=rss",

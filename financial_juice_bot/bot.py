@@ -35,7 +35,7 @@ class FinancialJuiceTelegramBot:
         self.ollama_client = OllamaClient(
             base_url=settings.ollama_base_url,
             model=settings.ollama_model,
-            timeout_seconds=settings.request_timeout_seconds * 3,
+            timeout_seconds=settings.ollama_timeout_seconds,
             temperature=settings.ollama_temperature,
         )
         self.news_service = NewsService(
@@ -158,6 +158,7 @@ class FinancialJuiceTelegramBot:
         text = (
             f"구독 상태: {'ON' if subscribed else 'OFF'}\n"
             f"Ollama 모델: {self.settings.ollama_model}\n"
+            f"Ollama 타임아웃: {int(self.settings.ollama_timeout_seconds)}초\n"
             f"폴링 주기: {self.settings.poll_interval_seconds}초\n"
             f"RSS 최소 재요청 간격: {self.settings.rss_min_fetch_interval_seconds}초\n"
             f"저장된 최근 뉴스 수: {stored_news}"

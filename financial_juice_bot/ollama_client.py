@@ -91,6 +91,11 @@ class OllamaClient:
             data = response.json()
             content = data["message"]["content"]
             parsed = json.loads(content)
+        except httpx.ReadTimeout as exc:
+            raise OllamaError(
+                "Ollama 응답 시간이 초과됐습니다. "
+                "현재 모델이 느릴 수 있으니 .env의 OLLAMA_TIMEOUT_SECONDS 값을 더 크게 늘려 주세요."
+            ) from exc
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text
             raise OllamaError(
