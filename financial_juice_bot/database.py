@@ -21,6 +21,7 @@ class Database:
                     chat_type TEXT NOT NULL,
                     label TEXT NOT NULL,
                     is_active INTEGER NOT NULL DEFAULT 1,
+                    llm_enabled INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -43,14 +44,27 @@ class Database:
                 );
                 """
             )
+            self._ensure_subscriber_columns(conn)
+
+    def _ensure_subscriber_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(subscribers)").fetchall()
+        }
+        if "llm_enabled" not in columns:
+            conn.execute(
+                "ALTER TABLE subscribers ADD COLUMN llm_enabled INTEGER NOT NULL DEFAULT 1"
+            )
 
     def upsert_subscriber(self, chat_id: int, chat_type: str, label: str) -> None:
         now = self._now()
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO subscribers (chat_id, chat_type, label, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, 1, ?, ?)
+                INSERT INTO subscribers (
+                    chat_id, chat_type, label, is_active, llm_enabled, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 1, 1, ?, ?)
                 ON CONFLICT(chat_id) DO UPDATE SET
                     chat_type = excluded.chat_type,
                     label = excluded.label,
@@ -58,6 +72,26 @@ class Database:
                     updated_at = excluded.updated_at
                 """,
                 (chat_id, chat_type, label, now, now),
+            )
+
+    def save_llm_preference(
+        self, chat_id: int, chat_type: str, label: str, enabled: bool
+    ) -> None:
+        now = self._now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO subscribers (
+                    chat_id, chat_type, label, is_active, llm_enabled, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 0, ?, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    chat_type = excluded.chat_type,
+                    label = excluded.label,
+                    llm_enabled = excluded.llm_enabled,
+                    updated_at = excluded.updated_at
+                """,
+                (chat_id, chat_type, label, int(enabled), now, now),
             )
 
     def deactivate_subscriber(self, chat_id: int) -> None:
@@ -74,6 +108,16 @@ class Database:
                 (chat_id,),
             ).fetchone()
         return bool(row and row["is_active"])
+
+    def is_llm_enabled(self, chat_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT llm_enabled FROM subscribers WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+        if row is None:
+            return True
+        return bool(row["llm_enabled"])
 
     def list_active_chat_ids(self) -> list[int]:
         with self._connect() as conn:

@@ -59,6 +59,7 @@ class FinancialJuiceTelegramBot:
         application.add_handler(CommandHandler("subscribe", self.subscribe_command))
         application.add_handler(CommandHandler("unsubscribe", self.unsubscribe_command))
         application.add_handler(CommandHandler("latest", self.latest_command))
+        application.add_handler(CommandHandler("llm", self.llm_command))
         application.add_handler(CommandHandler("status", self.status_command))
         application.add_error_handler(self.error_handler)
         return application
@@ -67,6 +68,7 @@ class FinancialJuiceTelegramBot:
         commands = [
             BotCommand("start", "봇 시작 및 구독"),
             BotCommand("latest", "저장된 최근 뉴스 보기"),
+            BotCommand("llm", "LLM 설명 on/off"),
             BotCommand("status", "구독 상태 확인"),
             BotCommand("subscribe", "새 뉴스 자동 수신"),
             BotCommand("unsubscribe", "자동 수신 중지"),
@@ -99,16 +101,20 @@ class FinancialJuiceTelegramBot:
         await update.effective_message.reply_text(
             (
                 "Financial Juice 실시간 헤드라인 구독을 시작했습니다.\n"
-                "/latest 로 최근 저장된 뉴스 번역을 보고, 이후에는 새 헤드라인이 저장되면 자동으로 보내드립니다."
+                "/latest 로 최근 저장된 뉴스 번역을 보고, 이후에는 새 헤드라인이 저장되면 자동으로 보내드립니다.\n"
+                "설명을 숨기고 싶다면 /llm off 를 입력해 주세요."
             )
         )
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(
             (
-                "사용 가능한 명령어\n"
+                "사용 가능한 명령어:\n"
                 "/start - 현재 채팅을 구독합니다.\n"
                 "/latest - 최근 저장된 Financial Juice 번역을 보여줍니다.\n"
+                "/llm on - LLM 설명 표시를 켭니다.\n"
+                "/llm off - LLM 설명 표시를 끕니다.\n"
+                "/llm - 현재 LLM 설명 설정을 확인합니다.\n"
                 "/status - 현재 구독 상태와 설정을 확인합니다.\n"
                 "/subscribe - 자동 수신을 켭니다.\n"
                 "/unsubscribe - 자동 수신을 끕니다."
@@ -130,9 +136,15 @@ class FinancialJuiceTelegramBot:
 
     async def latest_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         limit = self._parse_latest_limit(context.args)
+        chat = update.effective_chat
         message = update.effective_message
-        if message is None:
+        if chat is None or message is None:
             return
+
+        try:
+            await self.news_service.refresh_recent_cached_insights(limit=limit)
+        except OllamaError:
+            logger.exception("Failed to refresh cached explanations for /latest.")
 
         insights = self.news_service.get_latest_from_database(limit=limit)
         if not insights:
@@ -141,12 +153,50 @@ class FinancialJuiceTelegramBot:
             )
             return
 
+        include_explanation = self.database.is_llm_enabled(chat.id)
         for insight in insights:
             await message.reply_text(
-                self._render_news_message(insight),
+                self._render_news_message(insight, include_explanation=include_explanation),
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
+
+    async def llm_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat = update.effective_chat
+        message = update.effective_message
+        if chat is None or message is None:
+            return
+
+        if not context.args:
+            current = "ON" if self.database.is_llm_enabled(chat.id) else "OFF"
+            await message.reply_text(
+                f"LLM 설명 설정: {current}\n"
+                "사용법: /llm on 또는 /llm off"
+            )
+            return
+
+        option = context.args[0].strip().lower()
+        aliases = {
+            "on": True,
+            "enable": True,
+            "켜기": True,
+            "off": False,
+            "disable": False,
+            "끄기": False,
+        }
+        enabled = aliases.get(option)
+        if enabled is None:
+            await message.reply_text("사용법: /llm on 또는 /llm off")
+            return
+
+        label = chat.title or chat.full_name or str(chat.id)
+        self.database.save_llm_preference(chat.id, chat.type, label, enabled)
+        state_text = "켜졌습니다" if enabled else "꺼졌습니다"
+        visibility_text = "포함됩니다" if enabled else "숨겨집니다"
+        await message.reply_text(
+            f"LLM 설명 표시가 {state_text}.\n"
+            f"이제 /latest 와 자동 알림에서 설명이 {visibility_text}."
+        )
 
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat = update.effective_chat
@@ -154,9 +204,11 @@ class FinancialJuiceTelegramBot:
             return
 
         subscribed = self.database.is_active_subscriber(chat.id)
+        llm_enabled = self.database.is_llm_enabled(chat.id)
         stored_news = len(self.news_service.get_latest_from_database(limit=10))
         text = (
             f"구독 상태: {'ON' if subscribed else 'OFF'}\n"
+            f"LLM 설명: {'ON' if llm_enabled else 'OFF'}\n"
             f"Ollama 모델: {self.settings.ollama_model}\n"
             f"Ollama 타임아웃: {int(self.settings.ollama_timeout_seconds)}초\n"
             f"폴링 주기: {self.settings.poll_interval_seconds}초\n"
@@ -189,7 +241,10 @@ class FinancialJuiceTelegramBot:
                     try:
                         await context.bot.send_message(
                             chat_id=chat_id,
-                            text=self._render_news_message(insight),
+                            text=self._render_news_message(
+                                insight,
+                                include_explanation=self.database.is_llm_enabled(chat_id),
+                            ),
                             parse_mode=ParseMode.HTML,
                             disable_web_page_preview=True,
                         )
@@ -224,17 +279,24 @@ class FinancialJuiceTelegramBot:
             if guids:
                 self.database.seed_sent_news(chat.id, guids)
 
-    def _render_news_message(self, insight: NewsInsight) -> str:
+    def _render_news_message(self, insight: NewsInsight, include_explanation: bool = True) -> str:
         local_time = insight.published_at.astimezone(ZoneInfo(self.settings.timezone))
         time_text = local_time.strftime("%Y-%m-%d %H:%M %Z")
-        return (
-            f"<b>Financial Juice</b>\n"
-            f"<b>원문</b>: {escape(insight.title)}\n"
-            f"<b>번역</b>: {escape(insight.translated_title)}\n"
-            f"<b>설명</b>: {escape(insight.explanation)}\n"
-            f"<b>시간</b>: {escape(time_text)}\n"
-            f"<a href=\"{escape(insight.link, quote=True)}\">원문 링크</a>"
+
+        lines = [
+            "<b>Financial Juice</b>",
+            f"<b>원문</b>: {escape(insight.title)}",
+            f"<b>번역</b>: {escape(insight.translated_title)}",
+        ]
+        if include_explanation:
+            lines.append(f"<b>설명</b>\n{escape(insight.explanation)}")
+        lines.extend(
+            [
+                f"<b>시간</b>: {escape(time_text)}",
+                f"<a href=\"{escape(insight.link, quote=True)}\">원문 링크</a>",
+            ]
         )
+        return "\n".join(lines)
 
     def _parse_latest_limit(self, args: list[str]) -> int:
         if not args:
