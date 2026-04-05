@@ -104,9 +104,3 @@ Financial Juice RSS는 짧은 시간에 여러 번 요청하면 `429 Too Many Re
 - `RSS_MIN_FETCH_INTERVAL_SECONDS=90`
 - `RSS_RATE_LIMIT_COOLDOWN_SECONDS=180`
 
-## 다음 단계 아이디어
-
-- 관심 키워드 필터링
-- 매크로/주식/원자재별 채널 분리
-- Dockerfile 추가 후 클라우드 배포
-- 관리자 전용 명령으로 강제 재전송/점검
