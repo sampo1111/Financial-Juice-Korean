@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from html import escape
 import logging
-from zoneinfo import ZoneInfo
 
 from telegram import BotCommand, Message, Update
 from telegram.constants import ParseMode
@@ -13,6 +11,7 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Contex
 from .config import Settings
 from .content_filter import is_card_post
 from .database import Database
+from .message_formatter import render_news_message
 from .models import NewsInsight, Subscriber
 from .rss import FeedFetchError, FinancialJuiceFeedClient
 from .services import NewsService
@@ -105,7 +104,7 @@ class FinancialJuiceTelegramBot:
         await update.effective_message.reply_text(
             (
                 "Financial Juice 헤드라인 구독을 시작했습니다.\n"
-                "/latest 로 최근 번역 뉴스를 확인할 수 있고, 이후 새 헤드라인은 자동으로 보내드립니다.\n"
+                "/latest 로 최근 뉴스를 확인할 수 있고, 이후 새 헤드라인은 자동으로 보내드립니다.\n"
                 "카드형 게시물은 기본적으로 꺼져 있습니다. 필요하면 /cards on 을 입력해 주세요."
             )
         )
@@ -222,7 +221,7 @@ class FinancialJuiceTelegramBot:
 
         if enabled:
             await message.reply_text(
-                "카드형 게시물 수신을 켰습니다. 이제 금리 확률/변동성/상관행렬 카드도 함께 받습니다."
+                "카드형 게시물 수신을 켰습니다. 이제 금리 확률, 변동성, 상관행렬 카드도 함께 받습니다."
             )
             return
 
@@ -342,20 +341,7 @@ class FinancialJuiceTelegramBot:
         )
 
     def _render_news_message(self, insight: NewsInsight) -> str:
-        local_time = insight.published_at.astimezone(ZoneInfo(self.settings.timezone))
-        time_text = local_time.strftime("%Y-%m-%d %H:%M %Z")
-        source_header = (
-            "<b>Financial Juice [속보]</b>"
-            if insight.is_breaking
-            else "<b>Financial Juice</b>"
-        )
-        return (
-            f"{source_header}\n"
-            f"<b>원문</b>: {escape(insight.title)}\n"
-            f"<b>번역</b>: {escape(insight.translated_title)}\n"
-            f"<b>시간</b>: {escape(time_text)}\n"
-            f"<a href=\"{escape(insight.link, quote=True)}\">원문 링크</a>"
-        )
+        return render_news_message(insight, self.settings.timezone)
 
     @staticmethod
     def _filter_insights_for_subscriber(
