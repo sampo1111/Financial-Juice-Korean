@@ -22,8 +22,9 @@ class Database:
                     label TEXT NOT NULL,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     receive_card_posts INTEGER NOT NULL DEFAULT 0,
-                    show_original INTEGER NOT NULL DEFAULT 1,
+                    show_original INTEGER NOT NULL DEFAULT 0,
                     show_time INTEGER NOT NULL DEFAULT 1,
+                    show_link INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -56,8 +57,11 @@ class Database:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO subscribers (chat_id, chat_type, label, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, 1, ?, ?)
+                INSERT INTO subscribers (
+                    chat_id, chat_type, label, is_active, receive_card_posts,
+                    show_original, show_time, show_link, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 1, 0, 0, 1, 0, ?, ?)
                 ON CONFLICT(chat_id) DO UPDATE SET
                     chat_type = excluded.chat_type,
                     label = excluded.label,
@@ -78,7 +82,7 @@ class Database:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT chat_id, chat_type, label, is_active, receive_card_posts, show_original, show_time
+                SELECT chat_id, chat_type, label, is_active, receive_card_posts, show_original, show_time, show_link
                 FROM subscribers
                 WHERE chat_id = ?
                 """,
@@ -96,40 +100,20 @@ class Database:
             receive_card_posts=bool(row["receive_card_posts"]),
             show_original=bool(row["show_original"]),
             show_time=bool(row["show_time"]),
+            show_link=bool(row["show_link"]),
         )
 
     def set_receive_card_posts(self, chat_id: int, enabled: bool) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE subscribers
-                SET receive_card_posts = ?, updated_at = ?
-                WHERE chat_id = ?
-                """,
-                (int(enabled), self._now(), chat_id),
-            )
+        self._update_subscriber_flag(chat_id, "receive_card_posts", enabled)
 
     def set_show_original(self, chat_id: int, enabled: bool) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE subscribers
-                SET show_original = ?, updated_at = ?
-                WHERE chat_id = ?
-                """,
-                (int(enabled), self._now(), chat_id),
-            )
+        self._update_subscriber_flag(chat_id, "show_original", enabled)
 
     def set_show_time(self, chat_id: int, enabled: bool) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE subscribers
-                SET show_time = ?, updated_at = ?
-                WHERE chat_id = ?
-                """,
-                (int(enabled), self._now(), chat_id),
-            )
+        self._update_subscriber_flag(chat_id, "show_time", enabled)
+
+    def set_show_link(self, chat_id: int, enabled: bool) -> None:
+        self._update_subscriber_flag(chat_id, "show_link", enabled)
 
     def is_active_subscriber(self, chat_id: int) -> bool:
         subscriber = self.get_subscriber(chat_id)
@@ -139,7 +123,7 @@ class Database:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT chat_id, chat_type, label, is_active, receive_card_posts, show_original, show_time
+                SELECT chat_id, chat_type, label, is_active, receive_card_posts, show_original, show_time, show_link
                 FROM subscribers
                 WHERE is_active = 1
                 ORDER BY created_at ASC
@@ -155,6 +139,7 @@ class Database:
                 receive_card_posts=bool(row["receive_card_posts"]),
                 show_original=bool(row["show_original"]),
                 show_time=bool(row["show_time"]),
+                show_link=bool(row["show_link"]),
             )
             for row in rows
         ]
@@ -290,6 +275,13 @@ class Database:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _update_subscriber_flag(self, chat_id: int, column: str, enabled: bool) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE subscribers SET {column} = ?, updated_at = ? WHERE chat_id = ?",
+                (int(enabled), self._now(), chat_id),
+            )
+
     @staticmethod
     def _ensure_subscriber_columns(conn: sqlite3.Connection) -> None:
         columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(subscribers)")}
@@ -299,11 +291,15 @@ class Database:
             )
         if "show_original" not in columns:
             conn.execute(
-                "ALTER TABLE subscribers ADD COLUMN show_original INTEGER NOT NULL DEFAULT 1"
+                "ALTER TABLE subscribers ADD COLUMN show_original INTEGER NOT NULL DEFAULT 0"
             )
         if "show_time" not in columns:
             conn.execute(
                 "ALTER TABLE subscribers ADD COLUMN show_time INTEGER NOT NULL DEFAULT 1"
+            )
+        if "show_link" not in columns:
+            conn.execute(
+                "ALTER TABLE subscribers ADD COLUMN show_link INTEGER NOT NULL DEFAULT 0"
             )
 
     @staticmethod

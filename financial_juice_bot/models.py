@@ -35,3 +35,4 @@ class Subscriber:
     receive_card_posts: bool = False
     show_original: bool = True
     show_time: bool = True
+    show_link: bool = True

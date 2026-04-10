@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Protocol
 
 from .database import Database
@@ -94,19 +95,37 @@ class NewsService:
             if value and value not in translated:
                 return True
 
-        if "MOM" in title.upper() and "전월" not in translated and "MoM" not in translated:
+        upper_title = title.upper()
+        if "MOM" in upper_title and "전월" not in translated and "MoM" not in translated:
             return True
-        if "YOY" in title.upper() and "전년" not in translated and "YoY" not in translated:
+        if "YOY" in upper_title and "전년" not in translated and "YoY" not in translated:
             return True
-        if "QOQ" in title.upper() and "전분기" not in translated and "QoQ" not in translated:
+        if "QOQ" in upper_title and "전분기" not in translated and "QoQ" not in translated:
+            return True
+
+        if "TotalEnergies" in title and "총 에너지" in translated:
+            return True
+        if "processing train" in title.lower() and ("열차" in translated or "트레인" in translated):
+            return True
+        if re.search(r"\bunits shut down after incidents\b", title, re.IGNORECASE):
+            if "유닛 수" in translated or "가동 중단된 유닛" in translated:
+                return True
+
+        if re.search(r"\bpriced in\b", title, re.IGNORECASE) and "선반영" not in translated:
+            return True
+        if re.search(r"\brisk-off\b", title, re.IGNORECASE) and "위험회피" not in translated:
+            return True
+        if re.search(r"\brisk-on\b", title, re.IGNORECASE) and "위험선호" not in translated:
+            return True
+        if re.search(r"\bhawkish\b", title, re.IGNORECASE) and "매파" not in translated:
+            return True
+        if re.search(r"\bdovish\b", title, re.IGNORECASE) and "비둘기파" not in translated:
             return True
 
         return False
 
     @staticmethod
     def _extract_tagged_value(title: str, label: str) -> str | None:
-        import re
-
         match = re.search(
             rf"\b{label}\s+([A-Za-z0-9.+\-/%]+)",
             title,
