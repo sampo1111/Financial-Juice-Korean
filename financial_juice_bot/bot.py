@@ -13,9 +13,9 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Contex
 from .config import Settings
 from .database import Database
 from .models import NewsInsight
-from .ollama_client import OllamaClient, OllamaError
 from .rss import FeedFetchError, FinancialJuiceFeedClient
 from .services import NewsService
+from .translator_client import DeepLTranslateClient, TranslationError
 
 
 logger = logging.getLogger(__name__)
@@ -32,16 +32,17 @@ class FinancialJuiceTelegramBot:
             min_fetch_interval_seconds=settings.rss_min_fetch_interval_seconds,
             rate_limit_cooldown_seconds=settings.rss_rate_limit_cooldown_seconds,
         )
-        self.ollama_client = OllamaClient(
-            base_url=settings.ollama_base_url,
-            model=settings.ollama_model,
-            timeout_seconds=settings.ollama_timeout_seconds,
-            temperature=settings.ollama_temperature,
+        self.translator_client = DeepLTranslateClient(
+            api_key=settings.deepl_api_key,
+            base_url=settings.deepl_api_base_url,
+            source_lang=settings.deepl_source_lang,
+            target_lang=settings.deepl_target_lang,
+            timeout_seconds=settings.request_timeout_seconds,
         )
         self.news_service = NewsService(
             database=self.database,
             feed_client=self.feed_client,
-            ollama_client=self.ollama_client,
+            translator_client=self.translator_client,
         )
         self.broadcast_lock = asyncio.Lock()
 
@@ -76,7 +77,7 @@ class FinancialJuiceTelegramBot:
 
         try:
             await self.news_service.sync_latest_insights(limit=10)
-        except (FeedFetchError, OllamaError):
+        except (FeedFetchError, TranslationError):
             logger.exception("Initial Financial Juice sync failed.")
 
         if application.job_queue is None:
@@ -157,8 +158,8 @@ class FinancialJuiceTelegramBot:
         stored_news = len(self.news_service.get_latest_from_database(limit=10))
         text = (
             f"구독 상태: {'ON' if subscribed else 'OFF'}\n"
-            f"Ollama 모델: {self.settings.ollama_model}\n"
-            f"Ollama 타임아웃: {int(self.settings.ollama_timeout_seconds)}초\n"
+            f"번역 엔진: {self.settings.translator_engine}\n"
+            f"언어쌍: {self.settings.deepl_source_lang} -> {self.settings.deepl_target_lang}\n"
             f"폴링 주기: {self.settings.poll_interval_seconds}초\n"
             f"RSS 최소 재요청 간격: {self.settings.rss_min_fetch_interval_seconds}초\n"
             f"저장된 최근 뉴스 수: {stored_news}"
@@ -177,7 +178,7 @@ class FinancialJuiceTelegramBot:
 
             try:
                 insights = await self.news_service.get_pending_broadcasts(lookback_limit=10)
-            except (FeedFetchError, OllamaError):
+            except (FeedFetchError, TranslationError):
                 logger.exception("Failed to sync Financial Juice headlines.")
                 return
 
@@ -227,8 +228,9 @@ class FinancialJuiceTelegramBot:
     def _render_news_message(self, insight: NewsInsight) -> str:
         local_time = insight.published_at.astimezone(ZoneInfo(self.settings.timezone))
         time_text = local_time.strftime("%Y-%m-%d %H:%M %Z")
+        source_header = "<b>Financial Juice [속보]</b>" if insight.is_breaking else "<b>Financial Juice</b>"
         return (
-            f"<b>Financial Juice</b>\n"
+            f"{source_header}\n"
             f"<b>원문</b>: {escape(insight.title)}\n"
             f"<b>번역</b>: {escape(insight.translated_title)}\n"
             f"<b>설명</b>: {escape(insight.explanation)}\n"

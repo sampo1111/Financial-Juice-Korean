@@ -32,6 +32,7 @@ class Database:
                     explanation TEXT NOT NULL,
                     source_url TEXT NOT NULL,
                     published_at TEXT NOT NULL,
+                    is_breaking INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 );
 
@@ -43,6 +44,7 @@ class Database:
                 );
                 """
             )
+            self._ensure_processed_news_columns(conn)
 
     def upsert_subscriber(self, chat_id: int, chat_type: str, label: str) -> None:
         now = self._now()
@@ -86,7 +88,7 @@ class Database:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT guid, title, translated_title, explanation, source_url, published_at
+                SELECT guid, title, translated_title, explanation, source_url, published_at, is_breaking
                 FROM processed_news
                 WHERE guid = ?
                 """,
@@ -103,6 +105,7 @@ class Database:
             explanation=row["explanation"],
             link=row["source_url"],
             published_at=datetime.fromisoformat(row["published_at"]),
+            is_breaking=bool(row["is_breaking"]),
         )
 
     def save_processed_news(self, insight: NewsInsight) -> None:
@@ -110,15 +113,16 @@ class Database:
             conn.execute(
                 """
                 INSERT INTO processed_news (
-                    guid, title, translated_title, explanation, source_url, published_at, created_at
+                    guid, title, translated_title, explanation, source_url, published_at, is_breaking, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(guid) DO UPDATE SET
                     title = excluded.title,
                     translated_title = excluded.translated_title,
                     explanation = excluded.explanation,
                     source_url = excluded.source_url,
-                    published_at = excluded.published_at
+                    published_at = excluded.published_at,
+                    is_breaking = excluded.is_breaking
                 """,
                 (
                     insight.guid,
@@ -127,6 +131,7 @@ class Database:
                     insight.explanation,
                     insight.link,
                     insight.published_at.isoformat(),
+                    int(insight.is_breaking),
                     self._now(),
                 ),
             )
@@ -135,7 +140,7 @@ class Database:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT guid, title, translated_title, explanation, source_url, published_at
+                SELECT guid, title, translated_title, explanation, source_url, published_at, is_breaking
                 FROM processed_news
                 ORDER BY published_at DESC
                 LIMIT ?
@@ -151,6 +156,7 @@ class Database:
                 explanation=row["explanation"],
                 link=row["source_url"],
                 published_at=datetime.fromisoformat(row["published_at"]),
+                is_breaking=bool(row["is_breaking"]),
             )
             for row in rows
         ]
@@ -204,6 +210,17 @@ class Database:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    @staticmethod
+    def _ensure_processed_news_columns(conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(processed_news)").fetchall()
+        }
+        if "is_breaking" not in columns:
+            conn.execute(
+                "ALTER TABLE processed_news ADD COLUMN is_breaking INTEGER NOT NULL DEFAULT 0"
+            )
 
     @staticmethod
     def _now() -> str:

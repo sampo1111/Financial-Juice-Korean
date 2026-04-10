@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Protocol
 import logging
 
 from .database import Database
 from .models import NewsInsight, NewsItem
-from .ollama_client import OllamaClient, OllamaError
 from .rss import FinancialJuiceFeedClient
+from .translator_client import TranslationError
 
 
 logger = logging.getLogger(__name__)
+
+
+class TranslatorClient(Protocol):
+    async def translate_and_explain(self, item: NewsItem) -> NewsInsight: ...
+
+    async def aclose(self) -> None: ...
 
 
 class NewsService:
@@ -17,11 +24,11 @@ class NewsService:
         self,
         database: Database,
         feed_client: FinancialJuiceFeedClient,
-        ollama_client: OllamaClient,
+        translator_client: TranslatorClient,
     ) -> None:
         self.database = database
         self.feed_client = feed_client
-        self.ollama_client = ollama_client
+        self.translator_client = translator_client
         self._sync_lock = asyncio.Lock()
 
     async def sync_latest_insights(self, limit: int) -> list[NewsInsight]:
@@ -31,7 +38,7 @@ class NewsService:
             for item in items:
                 try:
                     insights.append(await self.ensure_insight(item))
-                except OllamaError:
+                except TranslationError:
                     logger.exception("Failed to create insight for guid=%s", item.guid)
             return insights
 
@@ -50,12 +57,15 @@ class NewsService:
     async def ensure_insight(self, item: NewsItem) -> NewsInsight:
         cached = self.database.get_processed_news(item.guid)
         if cached is not None:
+            if item.is_breaking and not cached.is_breaking:
+                cached.is_breaking = True
+                self.database.save_processed_news(cached)
             return cached
 
-        insight = await self.ollama_client.translate_and_explain(item)
+        insight = await self.translator_client.translate_and_explain(item)
         self.database.save_processed_news(insight)
         return insight
 
     async def aclose(self) -> None:
         await self.feed_client.aclose()
-        await self.ollama_client.aclose()
+        await self.translator_client.aclose()

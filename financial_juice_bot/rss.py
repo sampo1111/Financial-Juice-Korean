@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+import logging
 import time
+from urllib.parse import urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
 import httpx
 
+from .live_client import FinancialJuiceLiveClient, LiveFeedError
 from .models import NewsItem
 
 
@@ -16,6 +19,9 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/135.0.0.0 Safari/537.36"
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class FeedFetchError(RuntimeError):
@@ -37,6 +43,10 @@ class FinancialJuiceFeedClient:
             timeout=timeout_seconds,
             follow_redirects=True,
             headers={"User-Agent": USER_AGENT},
+        )
+        self._live_client = FinancialJuiceLiveClient(
+            timeout_seconds=timeout_seconds,
+            min_fetch_interval_seconds=min_fetch_interval_seconds,
         )
         self._cache: list[NewsItem] = []
         self._last_fetch_monotonic: float | None = None
@@ -89,6 +99,8 @@ class FinancialJuiceFeedClient:
                     return cached_items
                 raise FeedFetchError("Financial Juice RSS feed returned invalid XML.") from exc
 
+            await self._apply_breaking_flags(items)
+
             self._cache = items
             self._last_fetch_monotonic = now
             self._rate_limited_until = None
@@ -99,13 +111,14 @@ class FinancialJuiceFeedClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+        await self._live_client.aclose()
 
     def _parse_items(self, xml_text: str, limit: int) -> list[NewsItem]:
         root = ET.fromstring(xml_text)
         items: list[NewsItem] = []
         for node in root.findall("./channel/item"):
             title = (node.findtext("title") or "").strip()
-            link = (node.findtext("link") or "").strip()
+            link = self._normalize_article_link((node.findtext("link") or "").strip())
             guid = (node.findtext("guid") or link or title).strip()
             pub_date = (node.findtext("pubDate") or "").strip()
 
@@ -132,6 +145,34 @@ class FinancialJuiceFeedClient:
 
         return items
 
+    async def _apply_breaking_flags(self, items: list[NewsItem]) -> None:
+        if not items:
+            return
+
+        try:
+            live_items = await self._live_client.fetch_latest(limit=max(len(items) * 2, 20))
+        except LiveFeedError:
+            logger.warning("Financial Juice live breaking sync failed.", exc_info=True)
+            return
+
+        breaking_links = {
+            self._normalize_article_link(item.link)
+            for item in live_items
+            if item.is_breaking
+        }
+        breaking_titles = {
+            self._normalize_title(item.title)
+            for item in live_items
+            if item.is_breaking
+        }
+
+        for item in items:
+            normalized_link = self._normalize_article_link(item.link)
+            normalized_title = self._normalize_title(item.title)
+            item.is_breaking = (
+                normalized_link in breaking_links or normalized_title in breaking_titles
+            )
+
     @staticmethod
     def _parse_retry_after(raw_value: str | None) -> int | None:
         if raw_value is None:
@@ -142,3 +183,14 @@ class FinancialJuiceFeedClient:
         except ValueError:
             return None
         return max(1, value)
+
+    @staticmethod
+    def _normalize_article_link(url: str) -> str:
+        if not url:
+            return ""
+        parts = urlsplit(url)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+    @staticmethod
+    def _normalize_title(title: str) -> str:
+        return " ".join(title.split()).strip().casefold()

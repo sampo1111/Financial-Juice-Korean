@@ -8,9 +8,11 @@ import os
 @dataclass(slots=True)
 class Settings:
     telegram_bot_token: str
-    ollama_model: str
-    ollama_base_url: str
-    ollama_timeout_seconds: float
+    translator_engine: str
+    deepl_api_key: str
+    deepl_api_base_url: str
+    deepl_source_lang: str
+    deepl_target_lang: str
     financial_juice_rss_url: str
     poll_interval_seconds: int
     rss_min_fetch_interval_seconds: int
@@ -19,7 +21,6 @@ class Settings:
     request_timeout_seconds: float
     timezone: str
     database_path: Path
-    ollama_temperature: float
 
 
 def load_settings() -> Settings:
@@ -29,10 +30,13 @@ def load_settings() -> Settings:
 
     return Settings(
         telegram_bot_token=telegram_bot_token,
-        ollama_model=os.getenv("OLLAMA_MODEL", "martain7r/finance-llama-8b:q4_k_m").strip()
-        or "martain7r/finance-llama-8b:q4_k_m",
-        ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
-        ollama_timeout_seconds=max(30.0, float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180"))),
+        translator_engine=os.getenv("TRANSLATOR_ENGINE", "deepl").strip() or "deepl",
+        deepl_api_key=os.getenv("DEEPL_API_KEY", "").strip(),
+        deepl_api_base_url=os.getenv("DEEPL_API_BASE_URL", "https://api-free.deepl.com").rstrip(
+            "/"
+        ),
+        deepl_source_lang=os.getenv("DEEPL_SOURCE_LANG", "EN").strip() or "EN",
+        deepl_target_lang=os.getenv("DEEPL_TARGET_LANG", "KO").strip() or "KO",
         financial_juice_rss_url=os.getenv(
             "FINANCIAL_JUICE_RSS_URL",
             "https://www.financialjuice.com/feed.ashx?xy=rss",
@@ -48,5 +52,4 @@ def load_settings() -> Settings:
         request_timeout_seconds=max(5.0, float(os.getenv("REQUEST_TIMEOUT_SECONDS", "20"))),
         timezone=os.getenv("BOT_TIMEZONE", "Asia/Seoul").strip() or "Asia/Seoul",
         database_path=Path(os.getenv("DATABASE_PATH", "bot.db")).expanduser().resolve(),
-        ollama_temperature=float(os.getenv("OLLAMA_TEMPERATURE", "0.1")),
     )

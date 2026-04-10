@@ -10,6 +10,7 @@ class NewsItem:
     title: str
     link: str
     published_at: datetime
+    is_breaking: bool = False
 
 
 @dataclass(slots=True)
@@ -20,3 +21,4 @@ class NewsInsight:
     explanation: str
     link: str
     published_at: datetime
+    is_breaking: bool = False
