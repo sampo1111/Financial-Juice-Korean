@@ -66,12 +66,12 @@ class FinancialJuiceTelegramBot:
 
     async def post_init(self, application: Application) -> None:
         commands = [
-            BotCommand("start", "봇 시작 및 구독"),
+            BotCommand("start", "시작 및 구독"),
             BotCommand("latest", "저장된 최근 뉴스 보기"),
             BotCommand("status", "구독 상태 확인"),
             BotCommand("subscribe", "새 뉴스 자동 수신"),
             BotCommand("unsubscribe", "자동 수신 중지"),
-            BotCommand("help", "도움말 보기"),
+            BotCommand("help", "사용법 보기"),
         ]
         await application.bot.set_my_commands(commands)
 
@@ -97,20 +97,25 @@ class FinancialJuiceTelegramBot:
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._subscribe_current_chat(update, seed_latest=True)
+        if update.effective_message is None:
+            return
         await update.effective_message.reply_text(
             (
                 "Financial Juice 실시간 헤드라인 구독을 시작했습니다.\n"
-                "/latest 로 최근 저장된 뉴스 번역을 보고, 이후에는 새 헤드라인이 저장되면 자동으로 보내드립니다."
+                "/latest 로 저장된 최근 뉴스를 확인할 수 있고, 이후 새 헤드라인은 자동으로 보내드립니다."
             )
         )
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.effective_message is None:
+            return
         await update.effective_message.reply_text(
             (
                 "사용 가능한 명령어\n"
                 "/start - 현재 채팅을 구독합니다.\n"
-                "/latest - 최근 저장된 Financial Juice 번역을 보여줍니다.\n"
-                "/status - 현재 구독 상태와 설정을 확인합니다.\n"
+                "/latest - 최근 저장된 Financial Juice 뉴스를 보여줍니다.\n"
+                "/latest 5 - 최근 5개까지 확인합니다.\n"
+                "/status - 현재 구독 상태를 확인합니다.\n"
                 "/subscribe - 자동 수신을 켭니다.\n"
                 "/unsubscribe - 자동 수신을 끕니다."
             )
@@ -118,11 +123,17 @@ class FinancialJuiceTelegramBot:
 
     async def subscribe_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._subscribe_current_chat(update, seed_latest=True)
-        await update.effective_message.reply_text("이 채팅은 이제 새 헤드라인을 자동으로 받습니다.")
+        if update.effective_message is None:
+            return
+        await update.effective_message.reply_text(
+            "이 채팅은 이제 새 헤드라인을 자동으로 받습니다."
+        )
 
-    async def unsubscribe_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def unsubscribe_command(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         chat = update.effective_chat
-        if chat is None:
+        if chat is None or update.effective_message is None:
             return
         self.database.deactivate_subscriber(chat.id)
         await update.effective_message.reply_text(
@@ -198,7 +209,9 @@ class FinancialJuiceTelegramBot:
                         logger.warning("Chat %s blocked the bot. Subscription disabled.", chat_id)
                         self.database.deactivate_subscriber(chat_id)
                     except TelegramError:
-                        logger.exception("Failed to send headline %s to chat %s", insight.guid, chat_id)
+                        logger.exception(
+                            "Failed to send headline %s to chat %s", insight.guid, chat_id
+                        )
                     else:
                         self.database.mark_news_sent(chat_id, insight.guid)
 
@@ -207,7 +220,7 @@ class FinancialJuiceTelegramBot:
         if isinstance(update, Update) and update.effective_message is not None:
             try:
                 await update.effective_message.reply_text(
-                    "처리 중 예기치 않은 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+                    "처리 중 예기치 않은 오류가 발생했습니다. 잠시 뒤 다시 시도해 주세요."
                 )
             except TelegramError:
                 logger.exception("Failed to send error message to Telegram.")
@@ -228,7 +241,11 @@ class FinancialJuiceTelegramBot:
     def _render_news_message(self, insight: NewsInsight) -> str:
         local_time = insight.published_at.astimezone(ZoneInfo(self.settings.timezone))
         time_text = local_time.strftime("%Y-%m-%d %H:%M %Z")
-        source_header = "<b>Financial Juice [속보]</b>" if insight.is_breaking else "<b>Financial Juice</b>"
+        source_header = (
+            "<b>Financial Juice [속보]</b>"
+            if insight.is_breaking
+            else "<b>Financial Juice</b>"
+        )
         return (
             f"{source_header}\n"
             f"<b>원문</b>: {escape(insight.title)}\n"

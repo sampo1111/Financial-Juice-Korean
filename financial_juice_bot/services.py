@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Protocol
 import logging
+from typing import Protocol
 
 from .database import Database
 from .models import NewsInsight, NewsItem

@@ -1,6 +1,6 @@
 # Financial Juice Telegram Bot
 
-Financial Juice RSS 헤드라인을 가져와서 한국어로 번역하고, 금융 용어 설명을 붙여 텔레그램으로 보내는 로컬 실행용 봇입니다. 이 버전은 LLM 없이 `DeepL API Free`와 규칙 기반 금융 해설만 사용합니다.
+Financial Juice RSS 헤드라인을 가져와서 한국어로 번역하고, 금융 용어 설명을 붙여 텔레그램으로 보내는 로컬 실행용 봇입니다. 이 버전은 `DeepL API Free`와 규칙 기반 금융 해설만 사용합니다.
 
 ## 구성
 
