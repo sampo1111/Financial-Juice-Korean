@@ -24,3 +24,12 @@ class NewsInsight:
     published_at: datetime
     is_breaking: bool = False
     image_url: str | None = None
+
+
+@dataclass(slots=True)
+class Subscriber:
+    chat_id: int
+    chat_type: str
+    label: str
+    is_active: bool
+    receive_card_posts: bool = False

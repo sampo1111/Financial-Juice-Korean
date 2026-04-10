@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import sqlite3
 
-from .models import NewsInsight
+from .models import NewsInsight, Subscriber
 
 
 class Database:
@@ -21,6 +21,7 @@ class Database:
                     chat_type TEXT NOT NULL,
                     label TEXT NOT NULL,
                     is_active INTEGER NOT NULL DEFAULT 1,
+                    receive_card_posts INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -45,6 +46,7 @@ class Database:
                 );
                 """
             )
+            self._ensure_subscriber_columns(conn)
             self._ensure_processed_news_columns(conn)
 
     def upsert_subscriber(self, chat_id: int, chat_type: str, label: str) -> None:
@@ -70,20 +72,64 @@ class Database:
                 (self._now(), chat_id),
             )
 
-    def is_active_subscriber(self, chat_id: int) -> bool:
+    def get_subscriber(self, chat_id: int) -> Subscriber | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT is_active FROM subscribers WHERE chat_id = ?",
+                """
+                SELECT chat_id, chat_type, label, is_active, receive_card_posts
+                FROM subscribers
+                WHERE chat_id = ?
+                """,
                 (chat_id,),
             ).fetchone()
-        return bool(row and row["is_active"])
 
-    def list_active_chat_ids(self) -> list[int]:
+        if row is None:
+            return None
+
+        return Subscriber(
+            chat_id=int(row["chat_id"]),
+            chat_type=str(row["chat_type"]),
+            label=str(row["label"]),
+            is_active=bool(row["is_active"]),
+            receive_card_posts=bool(row["receive_card_posts"]),
+        )
+
+    def set_receive_card_posts(self, chat_id: int, enabled: bool) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE subscribers
+                SET receive_card_posts = ?, updated_at = ?
+                WHERE chat_id = ?
+                """,
+                (int(enabled), self._now(), chat_id),
+            )
+
+    def is_active_subscriber(self, chat_id: int) -> bool:
+        subscriber = self.get_subscriber(chat_id)
+        return bool(subscriber and subscriber.is_active)
+
+    def list_active_subscribers(self) -> list[Subscriber]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT chat_id FROM subscribers WHERE is_active = 1 ORDER BY created_at ASC"
+                """
+                SELECT chat_id, chat_type, label, is_active, receive_card_posts
+                FROM subscribers
+                WHERE is_active = 1
+                ORDER BY created_at ASC
+                """
             ).fetchall()
-        return [int(row["chat_id"]) for row in rows]
+
+        return [
+            Subscriber(
+                chat_id=int(row["chat_id"]),
+                chat_type=str(row["chat_type"]),
+                label=str(row["label"]),
+                is_active=bool(row["is_active"]),
+                receive_card_posts=bool(row["receive_card_posts"]),
+            )
+            for row in rows
+        ]
 
     def get_processed_news(self, guid: str) -> NewsInsight | None:
         with self._connect() as conn:
@@ -215,6 +261,14 @@ class Database:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    @staticmethod
+    def _ensure_subscriber_columns(conn: sqlite3.Connection) -> None:
+        columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(subscribers)")}
+        if "receive_card_posts" not in columns:
+            conn.execute(
+                "ALTER TABLE subscribers ADD COLUMN receive_card_posts INTEGER NOT NULL DEFAULT 0"
+            )
 
     @staticmethod
     def _ensure_processed_news_columns(conn: sqlite3.Connection) -> None:

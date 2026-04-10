@@ -79,10 +79,15 @@ python main.py
 - `/status`: 현재 구독 상태 확인
 - `/subscribe`: 자동 알림 재개
 - `/unsubscribe`: 자동 알림 중단
+- `/cards`: 카드형 게시물 수신 상태 확인
+- `/cards on`: 금리 확률/변동성/상관행렬 카드 포함
+- `/cards off`: 일반 뉴스형 헤드라인만 수신
 
 ## 동작 방식
 
 `/start` 또는 `/subscribe`를 누르면 현재 채팅이 구독됩니다. 그 뒤로는 봇이 전역으로 RSS를 한 번만 확인하고, 새 헤드라인을 SQL에 저장한 뒤 각 사용자에게 그 저장본을 기준으로 보냅니다.
+
+카드형 게시물은 기본값이 `OFF`입니다. 현재는 `Interest Rate Probabilities`, `Implied Volatility`, `Correlation Matrix`, `Currency Strength Chart` 계열을 카드형 게시물로 분류하고 `/cards on`일 때만 전송합니다.
 
 처음 구독할 때는 바로 예전 헤드라인이 몰아서 오지 않도록 최근 항목들을 전송 완료로 기록해 둡니다. `/latest` 역시 외부 RSS를 다시 호출하지 않고 SQL에 저장된 최근 뉴스만 보여줍니다.
 
