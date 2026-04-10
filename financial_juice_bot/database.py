@@ -33,6 +33,7 @@ class Database:
                     source_url TEXT NOT NULL,
                     published_at TEXT NOT NULL,
                     is_breaking INTEGER NOT NULL DEFAULT 0,
+                    image_url TEXT,
                     created_at TEXT NOT NULL
                 );
 
@@ -88,7 +89,7 @@ class Database:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT guid, title, translated_title, explanation, source_url, published_at, is_breaking
+                SELECT guid, title, translated_title, explanation, source_url, published_at, is_breaking, image_url
                 FROM processed_news
                 WHERE guid = ?
                 """,
@@ -106,6 +107,7 @@ class Database:
             link=row["source_url"],
             published_at=datetime.fromisoformat(row["published_at"]),
             is_breaking=bool(row["is_breaking"]),
+            image_url=row["image_url"],
         )
 
     def save_processed_news(self, insight: NewsInsight) -> None:
@@ -113,16 +115,17 @@ class Database:
             conn.execute(
                 """
                 INSERT INTO processed_news (
-                    guid, title, translated_title, explanation, source_url, published_at, is_breaking, created_at
+                    guid, title, translated_title, explanation, source_url, published_at, is_breaking, image_url, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(guid) DO UPDATE SET
                     title = excluded.title,
                     translated_title = excluded.translated_title,
                     explanation = excluded.explanation,
                     source_url = excluded.source_url,
                     published_at = excluded.published_at,
-                    is_breaking = excluded.is_breaking
+                    is_breaking = excluded.is_breaking,
+                    image_url = excluded.image_url
                 """,
                 (
                     insight.guid,
@@ -132,6 +135,7 @@ class Database:
                     insight.link,
                     insight.published_at.isoformat(),
                     int(insight.is_breaking),
+                    insight.image_url,
                     self._now(),
                 ),
             )
@@ -140,7 +144,7 @@ class Database:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT guid, title, translated_title, explanation, source_url, published_at, is_breaking
+                SELECT guid, title, translated_title, explanation, source_url, published_at, is_breaking, image_url
                 FROM processed_news
                 ORDER BY published_at DESC
                 LIMIT ?
@@ -157,6 +161,7 @@ class Database:
                 link=row["source_url"],
                 published_at=datetime.fromisoformat(row["published_at"]),
                 is_breaking=bool(row["is_breaking"]),
+                image_url=row["image_url"],
             )
             for row in rows
         ]
@@ -221,6 +226,8 @@ class Database:
             conn.execute(
                 "ALTER TABLE processed_news ADD COLUMN is_breaking INTEGER NOT NULL DEFAULT 0"
             )
+        if "image_url" not in columns:
+            conn.execute("ALTER TABLE processed_news ADD COLUMN image_url TEXT")
 
     @staticmethod
     def _now() -> str:

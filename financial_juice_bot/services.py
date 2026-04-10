@@ -57,8 +57,20 @@ class NewsService:
     async def ensure_insight(self, item: NewsItem) -> NewsInsight:
         cached = self.database.get_processed_news(item.guid)
         if cached is not None:
+            changed = False
             if item.is_breaking and not cached.is_breaking:
                 cached.is_breaking = True
+                changed = True
+            if item.image_url and item.image_url != cached.image_url:
+                cached.image_url = item.image_url
+                changed = True
+            if self._needs_translation_refresh(item, cached):
+                refreshed = await self.translator_client.translate_and_explain(item)
+                refreshed.is_breaking = item.is_breaking or cached.is_breaking
+                refreshed.image_url = item.image_url or cached.image_url
+                self.database.save_processed_news(refreshed)
+                return refreshed
+            if changed:
                 self.database.save_processed_news(cached)
             return cached
 
@@ -69,3 +81,37 @@ class NewsService:
     async def aclose(self) -> None:
         await self.feed_client.aclose()
         await self.translator_client.aclose()
+
+    @staticmethod
+    def _needs_translation_refresh(item: NewsItem, cached: NewsInsight) -> bool:
+        title = item.title
+        translated = cached.translated_title
+        if not translated:
+            return True
+
+        for label in ("Actual", "Forecast", "Previous"):
+            value = NewsService._extract_tagged_value(title, label)
+            if value and value not in translated:
+                return True
+
+        if "MOM" in title.upper() and "전월" not in translated and "MoM" not in translated:
+            return True
+        if "YOY" in title.upper() and "전년" not in translated and "YoY" not in translated:
+            return True
+        if "QOQ" in title.upper() and "전분기" not in translated and "QoQ" not in translated:
+            return True
+
+        return False
+
+    @staticmethod
+    def _extract_tagged_value(title: str, label: str) -> str | None:
+        import re
+
+        match = re.search(
+            rf"\b{label}\s+([A-Za-z0-9.+\-/%]+)",
+            title,
+            re.IGNORECASE,
+        )
+        if match is None:
+            return None
+        return match.group(1).rstrip(",)")

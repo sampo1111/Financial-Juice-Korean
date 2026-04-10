@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -10,6 +11,9 @@ from telegram.error import Conflict
 from financial_juice_bot.bot import FinancialJuiceTelegramBot
 from financial_juice_bot.config import load_settings
 from financial_juice_bot.runtime import SingleInstanceError, SingleInstanceLock
+
+
+MIN_PYTHON = (3, 10)
 
 
 def ensure_event_loop() -> None:
@@ -24,6 +28,15 @@ def ensure_event_loop() -> None:
 
 
 def main() -> None:
+    if sys.version_info < MIN_PYTHON:
+        required = ".".join(str(part) for part in MIN_PYTHON)
+        current = ".".join(str(part) for part in sys.version_info[:3])
+        raise SystemExit(
+            f"This project requires Python {required}+.\n"
+            f"Current interpreter: Python {current}\n"
+            "Install Python 3.10 or newer on the server and run the bot again."
+        )
+
     logging.basicConfig(
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         level=logging.INFO,

@@ -99,7 +99,7 @@ class FinancialJuiceFeedClient:
                     return cached_items
                 raise FeedFetchError("Financial Juice RSS feed returned invalid XML.") from exc
 
-            await self._apply_breaking_flags(items)
+            await self._apply_live_metadata(items)
 
             self._cache = items
             self._last_fetch_monotonic = now
@@ -145,7 +145,7 @@ class FinancialJuiceFeedClient:
 
         return items
 
-    async def _apply_breaking_flags(self, items: list[NewsItem]) -> None:
+    async def _apply_live_metadata(self, items: list[NewsItem]) -> None:
         if not items:
             return
 
@@ -155,23 +155,23 @@ class FinancialJuiceFeedClient:
             logger.warning("Financial Juice live breaking sync failed.", exc_info=True)
             return
 
-        breaking_links = {
-            self._normalize_article_link(item.link)
-            for item in live_items
-            if item.is_breaking
+        metadata_by_link = {
+            self._normalize_article_link(item.link): item for item in live_items
         }
-        breaking_titles = {
-            self._normalize_title(item.title)
-            for item in live_items
-            if item.is_breaking
+        metadata_by_title = {
+            self._normalize_title(item.title): item for item in live_items
         }
 
         for item in items:
             normalized_link = self._normalize_article_link(item.link)
             normalized_title = self._normalize_title(item.title)
-            item.is_breaking = (
-                normalized_link in breaking_links or normalized_title in breaking_titles
+            metadata = metadata_by_link.get(normalized_link) or metadata_by_title.get(
+                normalized_title
             )
+            if metadata is None:
+                continue
+            item.is_breaking = metadata.is_breaking
+            item.image_url = metadata.image_url
 
     @staticmethod
     def _parse_retry_after(raw_value: str | None) -> int | None:

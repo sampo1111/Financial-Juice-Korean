@@ -31,6 +31,7 @@ class LiveHeadline:
     title: str
     link: str
     is_breaking: bool
+    image_url: str | None = None
 
 
 @dataclass(slots=True)
@@ -143,6 +144,7 @@ class FinancialJuiceLiveClient:
                     title=title,
                     link=link,
                     is_breaking=bool(node.get("Breaking")),
+                    image_url=self._normalize_image_url(str(node.get("Img", "")).strip()),
                 )
             )
 
@@ -158,3 +160,13 @@ class FinancialJuiceLiveClient:
         if offset is None:
             return 0
         return int(offset.total_seconds())
+
+    @staticmethod
+    def _normalize_image_url(raw_value: str) -> str | None:
+        if not raw_value:
+            return None
+        if raw_value.startswith("http://") or raw_value.startswith("https://"):
+            return raw_value
+        if raw_value.startswith("/"):
+            return f"https://www.financialjuice.com{raw_value}"
+        return f"https://www.financialjuice.com/{raw_value.lstrip('/')}"

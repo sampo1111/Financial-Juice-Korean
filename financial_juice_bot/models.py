@@ -11,6 +11,7 @@ class NewsItem:
     link: str
     published_at: datetime
     is_breaking: bool = False
+    image_url: str | None = None
 
 
 @dataclass(slots=True)
@@ -22,3 +23,4 @@ class NewsInsight:
     link: str
     published_at: datetime
     is_breaking: bool = False
+    image_url: str | None = None

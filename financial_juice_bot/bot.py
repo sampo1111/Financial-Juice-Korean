@@ -5,7 +5,7 @@ from html import escape
 import logging
 from zoneinfo import ZoneInfo
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, Message, Update
 from telegram.constants import ParseMode
 from telegram.error import Forbidden, TelegramError
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
@@ -101,8 +101,8 @@ class FinancialJuiceTelegramBot:
             return
         await update.effective_message.reply_text(
             (
-                "Financial Juice 실시간 헤드라인 구독을 시작했습니다.\n"
-                "/latest 로 저장된 최근 뉴스를 확인할 수 있고, 이후 새 헤드라인은 자동으로 보내드립니다."
+                "Financial Juice 헤드라인 구독을 시작했습니다.\n"
+                "/latest 로 최근 저장된 번역 뉴스를 확인할 수 있고, 이후 새 헤드라인은 자동으로 보내드립니다."
             )
         )
 
@@ -125,9 +125,7 @@ class FinancialJuiceTelegramBot:
         await self._subscribe_current_chat(update, seed_latest=True)
         if update.effective_message is None:
             return
-        await update.effective_message.reply_text(
-            "이 채팅은 이제 새 헤드라인을 자동으로 받습니다."
-        )
+        await update.effective_message.reply_text("이 채팅은 이제 새 헤드라인을 자동으로 받습니다.")
 
     async def unsubscribe_command(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -154,11 +152,7 @@ class FinancialJuiceTelegramBot:
             return
 
         for insight in insights:
-            await message.reply_text(
-                self._render_news_message(insight),
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
+            await self._reply_with_insight(message, insight)
 
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat = update.effective_chat
@@ -199,12 +193,7 @@ class FinancialJuiceTelegramBot:
                         continue
 
                     try:
-                        await context.bot.send_message(
-                            chat_id=chat_id,
-                            text=self._render_news_message(insight),
-                            parse_mode=ParseMode.HTML,
-                            disable_web_page_preview=True,
-                        )
+                        await self._send_insight(context, chat_id, insight)
                     except Forbidden:
                         logger.warning("Chat %s blocked the bot. Subscription disabled.", chat_id)
                         self.database.deactivate_subscriber(chat_id)
@@ -238,6 +227,50 @@ class FinancialJuiceTelegramBot:
             if guids:
                 self.database.seed_sent_news(chat.id, guids)
 
+    async def _reply_with_insight(self, message: Message, insight: NewsInsight) -> None:
+        text = self._render_news_message(insight)
+        if insight.image_url:
+            try:
+                await message.reply_photo(
+                    photo=insight.image_url,
+                    caption=text,
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            except TelegramError:
+                logger.exception("Failed to send photo reply for guid=%s", insight.guid)
+
+        await message.reply_text(
+            text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=bool(insight.image_url),
+        )
+
+    async def _send_insight(
+        self, context: ContextTypes.DEFAULT_TYPE, chat_id: int, insight: NewsInsight
+    ) -> None:
+        text = self._render_news_message(insight)
+        if insight.image_url:
+            try:
+                await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=insight.image_url,
+                    caption=text,
+                    parse_mode=ParseMode.HTML,
+                )
+                return
+            except TelegramError:
+                logger.exception(
+                    "Failed to send headline photo %s to chat %s", insight.guid, chat_id
+                )
+
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=bool(insight.image_url),
+        )
+
     def _render_news_message(self, insight: NewsInsight) -> str:
         local_time = insight.published_at.astimezone(ZoneInfo(self.settings.timezone))
         time_text = local_time.strftime("%Y-%m-%d %H:%M %Z")
@@ -250,7 +283,6 @@ class FinancialJuiceTelegramBot:
             f"{source_header}\n"
             f"<b>원문</b>: {escape(insight.title)}\n"
             f"<b>번역</b>: {escape(insight.translated_title)}\n"
-            f"<b>설명</b>: {escape(insight.explanation)}\n"
             f"<b>시간</b>: {escape(time_text)}\n"
             f"<a href=\"{escape(insight.link, quote=True)}\">원문 링크</a>"
         )
