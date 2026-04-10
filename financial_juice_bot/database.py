@@ -22,6 +22,8 @@ class Database:
                     label TEXT NOT NULL,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     receive_card_posts INTEGER NOT NULL DEFAULT 0,
+                    show_original INTEGER NOT NULL DEFAULT 1,
+                    show_time INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -76,7 +78,7 @@ class Database:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT chat_id, chat_type, label, is_active, receive_card_posts
+                SELECT chat_id, chat_type, label, is_active, receive_card_posts, show_original, show_time
                 FROM subscribers
                 WHERE chat_id = ?
                 """,
@@ -92,6 +94,8 @@ class Database:
             label=str(row["label"]),
             is_active=bool(row["is_active"]),
             receive_card_posts=bool(row["receive_card_posts"]),
+            show_original=bool(row["show_original"]),
+            show_time=bool(row["show_time"]),
         )
 
     def set_receive_card_posts(self, chat_id: int, enabled: bool) -> None:
@@ -105,6 +109,28 @@ class Database:
                 (int(enabled), self._now(), chat_id),
             )
 
+    def set_show_original(self, chat_id: int, enabled: bool) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE subscribers
+                SET show_original = ?, updated_at = ?
+                WHERE chat_id = ?
+                """,
+                (int(enabled), self._now(), chat_id),
+            )
+
+    def set_show_time(self, chat_id: int, enabled: bool) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE subscribers
+                SET show_time = ?, updated_at = ?
+                WHERE chat_id = ?
+                """,
+                (int(enabled), self._now(), chat_id),
+            )
+
     def is_active_subscriber(self, chat_id: int) -> bool:
         subscriber = self.get_subscriber(chat_id)
         return bool(subscriber and subscriber.is_active)
@@ -113,7 +139,7 @@ class Database:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT chat_id, chat_type, label, is_active, receive_card_posts
+                SELECT chat_id, chat_type, label, is_active, receive_card_posts, show_original, show_time
                 FROM subscribers
                 WHERE is_active = 1
                 ORDER BY created_at ASC
@@ -127,6 +153,8 @@ class Database:
                 label=str(row["label"]),
                 is_active=bool(row["is_active"]),
                 receive_card_posts=bool(row["receive_card_posts"]),
+                show_original=bool(row["show_original"]),
+                show_time=bool(row["show_time"]),
             )
             for row in rows
         ]
@@ -268,6 +296,14 @@ class Database:
         if "receive_card_posts" not in columns:
             conn.execute(
                 "ALTER TABLE subscribers ADD COLUMN receive_card_posts INTEGER NOT NULL DEFAULT 0"
+            )
+        if "show_original" not in columns:
+            conn.execute(
+                "ALTER TABLE subscribers ADD COLUMN show_original INTEGER NOT NULL DEFAULT 1"
+            )
+        if "show_time" not in columns:
+            conn.execute(
+                "ALTER TABLE subscribers ADD COLUMN show_time INTEGER NOT NULL DEFAULT 1"
             )
 
     @staticmethod

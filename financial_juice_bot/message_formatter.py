@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from html import escape
 import re
 from zoneinfo import ZoneInfo
@@ -14,15 +13,42 @@ FORECAST_PATTERN = re.compile(r"\bForecast\s+(?P<forecast>[^(),]+)", re.IGNORECA
 PREVIOUS_PATTERN = re.compile(r"\bPrevious\s+(?P<previous>[^(),]+)", re.IGNORECASE)
 
 
-def render_news_message(insight: NewsInsight, timezone: str) -> str:
+def render_news_message(
+    insight: NewsInsight,
+    timezone: str,
+    *,
+    show_original: bool = True,
+    show_time: bool = True,
+) -> str:
     if is_card_post(insight.title):
-        return _render_card_message(insight, timezone)
+        return _render_card_message(
+            insight,
+            timezone,
+            show_original=show_original,
+            show_time=show_time,
+        )
     if _is_indicator_release(insight.title):
-        return _render_indicator_message(insight, timezone)
-    return _render_general_message(insight, timezone)
+        return _render_indicator_message(
+            insight,
+            timezone,
+            show_original=show_original,
+            show_time=show_time,
+        )
+    return _render_general_message(
+        insight,
+        timezone,
+        show_original=show_original,
+        show_time=show_time,
+    )
 
 
-def _render_indicator_message(insight: NewsInsight, timezone: str) -> str:
+def _render_indicator_message(
+    insight: NewsInsight,
+    timezone: str,
+    *,
+    show_original: bool,
+    show_time: bool,
+) -> str:
     header = "<b>[속보][지표]</b>" if insight.is_breaking else "<b>[지표]</b>"
     summary_title = _strip_trailing_parenthetical(insight.translated_title)
     stats = _build_stats_line(insight.title)
@@ -30,42 +56,50 @@ def _render_indicator_message(insight: NewsInsight, timezone: str) -> str:
     lines = [f"{header} {escape(summary_title)}"]
     if stats:
         lines.append(escape(stats))
-    lines.extend(
-        [
-            f"<code>{escape(_format_time(insight, timezone))}</code>",
-            _render_original_line(insight.title),
-            f"<a href=\"{escape(insight.link, quote=True)}\">링크</a>",
-        ]
-    )
+    lines.extend(_build_meta_lines(insight, timezone, show_original=show_original, show_time=show_time))
     return "\n".join(lines)
 
 
-def _render_general_message(insight: NewsInsight, timezone: str) -> str:
+def _render_general_message(
+    insight: NewsInsight,
+    timezone: str,
+    *,
+    show_original: bool,
+    show_time: bool,
+) -> str:
     header = "<b>[속보]</b>" if insight.is_breaking else "<b>[뉴스]</b>"
-    return "\n".join(
-        [
-            f"{header} {escape(insight.translated_title)}",
-            f"<code>{escape(_format_time(insight, timezone))}</code>",
-            _render_original_line(insight.title),
-            f"<a href=\"{escape(insight.link, quote=True)}\">링크</a>",
-        ]
-    )
+    lines = [f"{header} {escape(insight.translated_title)}"]
+    lines.extend(_build_meta_lines(insight, timezone, show_original=show_original, show_time=show_time))
+    return "\n".join(lines)
 
 
-def _render_card_message(insight: NewsInsight, timezone: str) -> str:
+def _render_card_message(
+    insight: NewsInsight,
+    timezone: str,
+    *,
+    show_original: bool,
+    show_time: bool,
+) -> str:
     header = "<b>[속보][카드]</b>" if insight.is_breaking else "<b>[카드]</b>"
-    return "\n".join(
-        [
-            f"{header} {escape(insight.translated_title)}",
-            f"<code>{escape(_format_time(insight, timezone))}</code>",
-            _render_original_line(insight.title),
-            f"<a href=\"{escape(insight.link, quote=True)}\">링크</a>",
-        ]
-    )
+    lines = [f"{header} {escape(insight.translated_title)}"]
+    lines.extend(_build_meta_lines(insight, timezone, show_original=show_original, show_time=show_time))
+    return "\n".join(lines)
 
 
-def _render_original_line(title: str) -> str:
-    return f"원문 <tg-spoiler>{escape(title)}</tg-spoiler>"
+def _build_meta_lines(
+    insight: NewsInsight,
+    timezone: str,
+    *,
+    show_original: bool,
+    show_time: bool,
+) -> list[str]:
+    lines: list[str] = []
+    if show_time:
+        lines.append(f"<code>{escape(_format_time(insight, timezone))}</code>")
+    if show_original:
+        lines.append(f"원문: {escape(insight.title)}")
+    lines.append(f"<a href=\"{escape(insight.link, quote=True)}\">원문 링크</a>")
+    return lines
 
 
 def _is_indicator_release(title: str) -> bool:
@@ -101,9 +135,5 @@ def _strip_trailing_parenthetical(text: str) -> str:
 
 
 def _format_time(insight: NewsInsight, timezone: str) -> str:
-    zone = ZoneInfo(timezone)
-    local_time = insight.published_at.astimezone(zone)
-    today = datetime.now(zone).date()
-    if local_time.date() == today:
-        return local_time.strftime("%H:%M %Z")
-    return local_time.strftime("%m-%d %H:%M %Z")
+    local_time = insight.published_at.astimezone(ZoneInfo(timezone))
+    return local_time.strftime("%Y-%m-%d %H:%M %Z")

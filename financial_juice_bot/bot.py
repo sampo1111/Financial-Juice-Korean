@@ -62,6 +62,8 @@ class FinancialJuiceTelegramBot:
         application.add_handler(CommandHandler("latest", self.latest_command))
         application.add_handler(CommandHandler("status", self.status_command))
         application.add_handler(CommandHandler("cards", self.cards_command))
+        application.add_handler(CommandHandler("original", self.original_command))
+        application.add_handler(CommandHandler("time", self.time_command))
         application.add_error_handler(self.error_handler)
         return application
 
@@ -73,6 +75,8 @@ class FinancialJuiceTelegramBot:
             BotCommand("subscribe", "자동 수신 켜기"),
             BotCommand("unsubscribe", "자동 수신 끄기"),
             BotCommand("cards", "카드형 게시물 설정"),
+            BotCommand("original", "원문 표시 설정"),
+            BotCommand("time", "시간 표시 설정"),
             BotCommand("help", "명령어 보기"),
         ]
         await application.bot.set_my_commands(commands)
@@ -105,7 +109,7 @@ class FinancialJuiceTelegramBot:
             (
                 "Financial Juice 헤드라인 구독을 시작했습니다.\n"
                 "/latest 로 최근 뉴스를 확인할 수 있고, 이후 새 헤드라인은 자동으로 보내드립니다.\n"
-                "카드형 게시물은 기본적으로 꺼져 있습니다. 필요하면 /cards on 을 입력해 주세요."
+                "원문 표시와 시간 표시는 각각 /original, /time 명령으로 켜고 끌 수 있습니다."
             )
         )
 
@@ -123,7 +127,13 @@ class FinancialJuiceTelegramBot:
                 "/unsubscribe - 자동 수신을 끕니다.\n"
                 "/cards - 카드형 게시물 수신 상태를 봅니다.\n"
                 "/cards on - 금리 확률/변동성/상관행렬 카드도 받습니다.\n"
-                "/cards off - 일반 뉴스만 받습니다."
+                "/cards off - 일반 뉴스만 받습니다.\n"
+                "/original - 원문 표시 상태를 봅니다.\n"
+                "/original on - 원문 줄을 표시합니다.\n"
+                "/original off - 원문 줄을 숨깁니다.\n"
+                "/time - 시간 표시 상태를 봅니다.\n"
+                "/time on - 시간 줄을 표시합니다.\n"
+                "/time off - 시간 줄을 숨깁니다."
             )
         )
 
@@ -164,7 +174,7 @@ class FinancialJuiceTelegramBot:
             return
 
         for insight in insights:
-            await self._reply_with_insight(message, insight)
+            await self._reply_with_insight(message, insight, subscriber=subscriber)
 
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat = update.effective_chat
@@ -174,11 +184,15 @@ class FinancialJuiceTelegramBot:
         subscriber = self.database.get_subscriber(chat.id)
         subscribed = bool(subscriber and subscriber.is_active)
         receive_card_posts = bool(subscriber and subscriber.receive_card_posts)
+        show_original = True if subscriber is None else subscriber.show_original
+        show_time = True if subscriber is None else subscriber.show_time
         stored_news = len(self.news_service.get_latest_from_database(limit=10))
 
         text = (
             f"구독 상태: {'ON' if subscribed else 'OFF'}\n"
             f"카드형 게시물: {'ON' if receive_card_posts else 'OFF'}\n"
+            f"원문 표시: {'ON' if show_original else 'OFF'}\n"
+            f"시간 표시: {'ON' if show_time else 'OFF'}\n"
             f"번역 엔진: {self.settings.translator_engine}\n"
             f"언어쌍: {self.settings.deepl_source_lang} -> {self.settings.deepl_target_lang}\n"
             f"폴링 주기: {self.settings.poll_interval_seconds}초\n"
@@ -229,6 +243,30 @@ class FinancialJuiceTelegramBot:
             "카드형 게시물 수신을 껐습니다. 이제 일반 뉴스형 헤드라인만 보냅니다."
         )
 
+    async def original_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._toggle_display_option(
+            update,
+            context,
+            label="원문 표시",
+            current_getter=lambda subscriber: subscriber.show_original,
+            setter=self.database.set_show_original,
+            on_message="원문 표시를 켰습니다. 이제 원문 줄이 함께 보입니다.",
+            off_message="원문 표시를 껐습니다. 이제 번역과 링크만 보입니다.",
+            usage="/original on 또는 /original off",
+        )
+
+    async def time_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._toggle_display_option(
+            update,
+            context,
+            label="시간 표시",
+            current_getter=lambda subscriber: subscriber.show_time,
+            setter=self.database.set_show_time,
+            on_message="시간 표시를 켰습니다. 이제 시간 줄이 함께 보입니다.",
+            off_message="시간 표시를 껐습니다. 이제 시간 줄이 숨겨집니다.",
+            usage="/time on 또는 /time off",
+        )
+
     async def broadcast_job(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         if self.broadcast_lock.locked():
             logger.info("Previous broadcast job is still running. Skipping this cycle.")
@@ -255,7 +293,12 @@ class FinancialJuiceTelegramBot:
                         continue
 
                     try:
-                        await self._send_insight(context, subscriber.chat_id, insight)
+                        await self._send_insight(
+                            context,
+                            subscriber.chat_id,
+                            insight,
+                            subscriber=subscriber,
+                        )
                     except Forbidden:
                         logger.warning(
                             "Chat %s blocked the bot. Subscription disabled.",
@@ -294,8 +337,52 @@ class FinancialJuiceTelegramBot:
             if guids:
                 self.database.seed_sent_news(chat.id, guids)
 
-    async def _reply_with_insight(self, message: Message, insight: NewsInsight) -> None:
-        text = self._render_news_message(insight)
+    async def _toggle_display_option(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        label: str,
+        current_getter,
+        setter,
+        on_message: str,
+        off_message: str,
+        usage: str,
+    ) -> None:
+        chat = update.effective_chat
+        message = update.effective_message
+        if chat is None or message is None:
+            return
+
+        subscriber = self.database.get_subscriber(chat.id)
+        if subscriber is None:
+            await message.reply_text(
+                "먼저 /start 또는 /subscribe 로 구독을 만든 뒤 사용해 주세요."
+            )
+            return
+
+        if not context.args:
+            state = "ON" if current_getter(subscriber) else "OFF"
+            await message.reply_text(f"{label}: {state}\n변경: {usage}")
+            return
+
+        option = context.args[0].strip().lower()
+        if option not in {"on", "off"}:
+            await message.reply_text(f"사용법: {usage}")
+            return
+
+        enabled = option == "on"
+        setter(chat.id, enabled)
+        await message.reply_text(on_message if enabled else off_message)
+
+    async def _reply_with_insight(
+        self,
+        message: Message,
+        insight: NewsInsight,
+        *,
+        subscriber: Subscriber | None,
+    ) -> None:
+        text = self._render_news_message(insight, subscriber=subscriber)
         if insight.image_url:
             try:
                 await message.reply_photo(
@@ -314,9 +401,14 @@ class FinancialJuiceTelegramBot:
         )
 
     async def _send_insight(
-        self, context: ContextTypes.DEFAULT_TYPE, chat_id: int, insight: NewsInsight
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        chat_id: int,
+        insight: NewsInsight,
+        *,
+        subscriber: Subscriber,
     ) -> None:
-        text = self._render_news_message(insight)
+        text = self._render_news_message(insight, subscriber=subscriber)
         if insight.image_url:
             try:
                 await context.bot.send_photo(
@@ -340,8 +432,20 @@ class FinancialJuiceTelegramBot:
             disable_web_page_preview=bool(insight.image_url),
         )
 
-    def _render_news_message(self, insight: NewsInsight) -> str:
-        return render_news_message(insight, self.settings.timezone)
+    def _render_news_message(
+        self,
+        insight: NewsInsight,
+        *,
+        subscriber: Subscriber | None,
+    ) -> str:
+        show_original = True if subscriber is None else subscriber.show_original
+        show_time = True if subscriber is None else subscriber.show_time
+        return render_news_message(
+            insight,
+            self.settings.timezone,
+            show_original=show_original,
+            show_time=show_time,
+        )
 
     @staticmethod
     def _filter_insights_for_subscriber(

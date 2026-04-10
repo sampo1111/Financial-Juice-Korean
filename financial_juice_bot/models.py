@@ -33,3 +33,5 @@ class Subscriber:
     label: str
     is_active: bool
     receive_card_posts: bool = False
+    show_original: bool = True
+    show_time: bool = True
